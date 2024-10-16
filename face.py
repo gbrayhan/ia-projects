@@ -127,7 +127,7 @@ TIEMPO_MIN_CIERRE = 1.0  # 1 segundo
 # Definir el frame rate estimado (puede ajustarse según la cámara)
 FRAME_RATE_ESTIMADO = 30  # 30 FPS
 
-# Estado de los ojos: 'esperando_cierre', 'cierre_detectado'
+# Estado de los ojos para detección de cierre prolongado
 estado_ojos = 'esperando_cierre'
 
 # Variables para la detección de cabezadas hacia abajo
@@ -167,39 +167,25 @@ while True:
             EAR_derecho = calcular_EAR(landmarks, lado='right')
             EAR_promedio = (EAR_izquierdo + EAR_derecho) / 2.0
 
-            # Detectar parpadeo
+            # Detección de parpadeo
             if EAR_promedio < EAR_UMBRAL:
                 contador_frames_parpadeo += 1
-                # Si se alcanza el número de frames para considerar un parpadeo
-                if contador_frames_parpadeo == CONSEC_FRAMES_PARPADEO:
-                    contador_parpadeos += 1
-                    # Reiniciar contador para evitar contar múltiples veces el mismo parpadeo
-                    contador_frames_parpadeo = 0
             else:
-                contador_frames_parpadeo = 0
+                if contador_frames_parpadeo >= CONSEC_FRAMES_PARPADEO:
+                    contador_parpadeos += 1
+                contador_frames_parpadeo = 0  # Reiniciar contador
 
-            # Detección de cierre de ojos para cabezadas
-            if estado_ojos == 'esperando_cierre':
-                if EAR_promedio < EAR_UMBRAL:
-                    if tiempo_inicio_cierre is None:
-                        tiempo_inicio_cierre = tiempo_actual
-                    # Verificar si el tiempo de cierre ha excedido el mínimo
+            # Detección de cierre prolongado de ojos
+            if EAR_promedio < EAR_UMBRAL:
+                if tiempo_inicio_cierre is None:
+                    tiempo_inicio_cierre = tiempo_actual
+            else:
+                if tiempo_inicio_cierre is not None:
                     duracion_cierre = tiempo_actual - tiempo_inicio_cierre
                     if duracion_cierre >= TIEMPO_MIN_CIERRE:
-                        estado_ojos = 'cierre_detectado'
-                        cabezada_listo = True  # El sistema está listo para detectar una cabezada
-            elif estado_ojos == 'cierre_detectado':
-                if EAR_promedio >= EAR_UMBRAL:
-                    # Los ojos se han abierto
-                    duracion_cierre = tiempo_actual - tiempo_inicio_cierre if tiempo_inicio_cierre else 0
-                    if duracion_cierre >= TIEMPO_MIN_CIERRE:
                         total_tiempo_cerrado += duracion_cierre
-                    # Reiniciar estado
-                    estado_ojos = 'esperando_cierre'
-                    tiempo_inicio_cierre = None
-                else:
-                    # Los ojos siguen cerrados; mantener el estado
-                    pass
+                        cabezada_listo = True  # El sistema está listo para detectar una cabezada
+                    tiempo_inicio_cierre = None  # Reiniciar
 
             # Estimar la pose de la cabeza
             pitch, yaw, roll = estimar_pose_cabeza(landmarks, frame.shape)
@@ -212,20 +198,6 @@ while True:
                     contador_cabezadas += 1
                     tiempo_ultima_cabezada = tiempo_actual
                     cabezada_listo = False  # Reiniciar para evitar múltiples conteos
-                    # Opcional: Puedes agregar una alerta visual o sonora aquí
-
-            # Detectar cuando los ojos se cierran para iniciar el tiempo de cierre
-            if EAR_promedio < EAR_UMBRAL and estado_ojos == 'esperando_cierre':
-                if tiempo_inicio_cierre is None:
-                    tiempo_inicio_cierre = tiempo_actual
-            else:
-                if estado_ojos == 'cierre_detectado':
-                    if EAR_promedio >= EAR_UMBRAL:
-                        duracion_cierre = tiempo_actual - tiempo_inicio_cierre if tiempo_inicio_cierre else 0
-                        if duracion_cierre >= TIEMPO_MIN_CIERRE:
-                            total_tiempo_cerrado += duracion_cierre
-                        estado_ojos = 'esperando_cierre'
-                        tiempo_inicio_cierre = None
 
     # Mostrar el conteo de parpadeos, tiempo cerrado y cabezadas
     cv2.putText(frame, f'Parpadeos: {contador_parpadeos}', (30, 30),
@@ -258,7 +230,7 @@ while True:
         break
 
 # Al finalizar, si los ojos estaban cerrados, sumar el tiempo restante
-if estado_ojos == 'cierre_detectado' and tiempo_inicio_cierre is not None:
+if tiempo_inicio_cierre is not None:
     duracion_cierre = time.time() - tiempo_inicio_cierre
     if duracion_cierre >= TIEMPO_MIN_CIERRE:
         total_tiempo_cerrado += duracion_cierre
